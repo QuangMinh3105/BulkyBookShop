@@ -1,9 +1,11 @@
 ﻿using BulkyBook.DataAccess.Repository.IRepository;
 using BulkyBook.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Build.Tasks.Deployment.Bootstrapper;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using System.Security.Claims;
 using Product = BulkyBook.Models.Product;
 
 namespace BulkyBookWeb.Areas.Customer.Controllers;
@@ -28,24 +30,49 @@ public class HomeController : Controller
         return View(productList);
     }
 
-    public IActionResult Details(int id)
+    public IActionResult Details(int productId)
     {
         ShoppingCart cartObj = new()
         {
-            Count=1,
-            Product = _unitOfWork.Product.GetFirstOrDefault(u => u.Id == id, includeProperties: "Category,CoverType")
+            Count = 1,
+            ProductId = productId,
+            Product = _unitOfWork.Product.GetFirstOrDefault(u => u.Id == productId, includeProperties: "Category,CoverType")
         };
         return View(cartObj);
-}
+    }
 
-public IActionResult Privacy()
-{
-    return View();
-}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize]
+    public IActionResult Details(ShoppingCart shoppingCart)
+    {
+        var claimsIdentity = (ClaimsIdentity)User.Identity;
+        var claim = claimsIdentity.FindFirst(ClaimTypes.NameIdentifier);
+        shoppingCart.ApplicationUserId = claim.Value;
 
-[ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
-public IActionResult Error()
-{
-    return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
-}
+        ShoppingCart cartFromDb = _unitOfWork.ShoppingCart.GetFirstOrDefault(u => u.ApplicationUserId == claim.Value && u.ProductId == shoppingCart.ProductId);
+
+        if (cartFromDb == null)
+        {
+            _unitOfWork.ShoppingCart.Add(shoppingCart);
+        }
+        else
+        {
+            _unitOfWork.ShoppingCart.IncrementCount(cartFromDb, shoppingCart.Count);
+        }
+        _unitOfWork.Save();
+
+        return RedirectToAction("Index");
+    }
+
+    public IActionResult Privacy()
+    {
+        return View();
+    }
+
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public IActionResult Error()
+    {
+        return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+    }
 }
